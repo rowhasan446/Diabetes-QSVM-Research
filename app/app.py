@@ -820,6 +820,52 @@ def load_clinical_shap_explainer():
     return surrogate_model, explainer
 
 
+# ============================================================
+# SHAP RESOURCE INITIALIZATION
+# ============================================================
+
+# Clinical SHAP
+clinical_shap_loaded = False
+clinical_shap_surrogate = None
+clinical_shap_explainer = None
+
+try:
+
+    (
+        clinical_shap_surrogate,
+        clinical_shap_explainer
+    ) = load_clinical_shap_explainer()
+
+    clinical_shap_loaded = True
+
+except Exception as e:
+
+    clinical_shap_loaded = False
+    clinical_shap_error = str(e)
+
+
+# Symptom SHAP
+symptom_shap_loaded = False
+symptom_shap_explainer = None
+
+try:
+
+    symptom_shap_explainer = load_pickle(
+        os.path.join(
+            SYMPTOM_DIR,
+            "symptom_shap_explainer.pkl"
+        )
+    )
+
+    symptom_shap_loaded = True
+
+except Exception as e:
+
+    symptom_shap_loaded = False
+    symptom_shap_error = str(e)
+
+
+
 
 
 
