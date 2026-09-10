@@ -821,6 +821,29 @@ def load_clinical_shap_explainer():
 
 
 # ============================================================
+
+# ============================================================
+# DML RESOURCE INITIALIZATION
+# ============================================================
+
+dml_loaded = False
+dml_results = None
+dml_error = None
+
+try:
+    dml_results = load_pickle(
+        os.path.join(
+            SYMPTOM_DIR,
+            "symptom_causal_results.pkl"
+        )
+    )
+
+    dml_loaded = True
+
+except Exception as e:
+    dml_loaded = False
+    dml_error = str(e)
+
 # SHAP RESOURCE INITIALIZATION
 # ============================================================
 
