@@ -1,0 +1,7 @@
+streamlit
+numpy
+pandas
+scikit-learn
+shap
+qiskit==2.5.2
+qiskit-machine-learning==0.9.1
