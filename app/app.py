@@ -1061,203 +1061,267 @@ def generate_symptom_feedback(
     symptom_explanation
 ):
     """
-    Generate controlled, personalized informational feedback.
+    Generate patient-specific informational feedback from:
 
-    Uses:
-        - Symptom QSVM prediction
-        - Patient-specific SHAP
-        - Predefined symptom guidance
+        1. Symptom QSVM prediction
+        2. Patient-specific SHAP contributions
+        3. Predefined symptom guidance
 
-    Does NOT diagnose or prescribe treatment.
+    SHAP magnitude determines feedback priority.
+
+    High priority:
+        |SHAP| >= 0.20
+
+    Moderate priority:
+        0.05 <= |SHAP| < 0.20
+
+    Lower priority:
+        |SHAP| < 0.05
+
+    This function provides informational guidance only.
+    It does not diagnose disease or prescribe treatment.
     """
 
-    feedback_sections = []
+    explanation = symptom_explanation.copy()
 
     # --------------------------------------------------------
-    # Risk result
+    # Ensure SHAP values are numeric
+    # --------------------------------------------------------
+
+    explanation["SHAP"] = pd.to_numeric(
+        explanation["SHAP"],
+        errors="coerce"
+    )
+
+    explanation["Absolute_SHAP"] = explanation["SHAP"].abs()
+
+    explanation = explanation.dropna(
+        subset=["SHAP"]
+    ).sort_values(
+        "Absolute_SHAP",
+        ascending=False
+    )
+
+    # --------------------------------------------------------
+    # Prediction summary
     # --------------------------------------------------------
 
     if prediction == 1:
-
-        feedback_sections.append(
-            "🔴 **Higher Predicted Diabetes Risk**\n\n"
-            "The symptom QSVM classified the current symptom "
-            "profile as higher predicted diabetes risk."
+        prediction_text = (
+            "The Symptom QSVM classified this profile as "
+            "**Higher Diabetes Risk**."
         )
-
     else:
-
-        feedback_sections.append(
-            "🟢 **Lower Predicted Diabetes Risk**\n\n"
-            "The symptom QSVM classified the current symptom "
-            "profile as lower predicted diabetes risk."
+        prediction_text = (
+            "The Symptom QSVM classified this profile as "
+            "**Lower Diabetes Risk**."
         )
 
+    feedback_parts = []
+
+    feedback_parts.append(
+        "### 🩺 Personalized Symptom Feedback\n\n"
+        + prediction_text
+        + "\n\n"
+        "The recommendations below are prioritized according to "
+        "the patient's individual SHAP contributions. A stronger "
+        "positive SHAP value means that the reported feature had "
+        "a stronger positive influence on this model's prediction."
+    )
+
+    # --------------------------------------------------------
+    # Symptom-specific guidance
+    # --------------------------------------------------------
+
+    personalized_actions = {
+
+        "Polyuria": (
+            "**Frequent urination was reported and this symptom "
+            "contributed positively to the model's prediction.** "
+            "Frequent urination can occur with elevated blood "
+            "glucose. Consider appropriate blood-glucose testing "
+            "and discuss the result with a healthcare professional. "
+            "If frequent urination is substantial, maintaining "
+            "adequate fluid intake is important."
+        ),
+
+        "Polydipsia": (
+            "**Excessive thirst was reported and contributed "
+            "positively to the model's prediction.** Persistent "
+            "excessive thirst can occur alongside elevated blood "
+            "glucose. Consider appropriate blood-glucose testing "
+            "and discuss the result with a healthcare professional. "
+            "Maintaining adequate hydration is important."
+        ),
+
+        "sudden weight loss": (
+            "**Sudden or unexplained weight loss was reported and "
+            "contributed positively to the model's prediction.** "
+            "Unexplained weight loss can have several possible "
+            "causes, including diabetes, and should not simply be "
+            "suppressed. Appropriate medical evaluation is "
+            "recommended."
+        ),
+
+        "partial paresis": (
+            "**Partial weakness or paresis was reported and "
+            "contributed positively to the model's prediction.** "
+            "Weakness can have multiple possible causes. If it is "
+            "new, persistent, or worsening, appropriate medical "
+            "evaluation is recommended."
+        ),
+
+        "Polyphagia": (
+            "**Increased hunger was reported and contributed "
+            "positively to the model's prediction.** Persistent "
+            "unexplained changes in appetite can occur for several "
+            "reasons, including changes in blood-glucose regulation. "
+            "Consider discussing persistent symptoms with a "
+            "healthcare professional."
+        ),
+
+        "Irritability": (
+            "**Irritability was reported and contributed positively "
+            "to the model's prediction.** Irritability is "
+            "non-specific and can have many possible causes. "
+            "Consider the overall symptom pattern rather than "
+            "using irritability alone to assess diabetes risk."
+        ),
+
+        "Gender": (
+            "Gender is a **non-modifiable characteristic** and "
+            "should not be treated as something that needs to be "
+            "changed or controlled. Its contribution should be "
+            "interpreted only as model context."
+        )
+    }
 
     # --------------------------------------------------------
     # Positive SHAP contributors
     # --------------------------------------------------------
 
-    positive_factors = symptom_explanation[
-        symptom_explanation["SHAP"] > 0
+    positive_factors = explanation[
+        explanation["SHAP"] > 0
     ].copy()
-
-    positive_factors = positive_factors.sort_values(
-        "SHAP",
-        ascending=False
-    )
 
     if len(positive_factors) > 0:
 
-        why_text = (
-            "### 🧠 Why did the model make this prediction?\n\n"
+        feedback_parts.append(
+            "\n### 🔴 Factors Increasing Predicted Risk\n"
         )
 
         for _, row in positive_factors.iterrows():
 
             feature = row["Feature"]
-            shap_value = row["SHAP"]
+            shap_value = float(row["SHAP"])
+            magnitude = abs(shap_value)
 
-            feature_name = symptom_guidance.get(
+            # ----------------------------------------------
+            # Determine priority from individual SHAP value
+            # ----------------------------------------------
+
+            if magnitude >= 0.20:
+                priority = "🔴 High Priority"
+            elif magnitude >= 0.05:
+                priority = "🟠 Moderate Priority"
+            else:
+                priority = "🟡 Lower Priority"
+
+            # ----------------------------------------------
+            # Non-modifiable features
+            # ----------------------------------------------
+
+            if feature in symptom_guidance:
+                feature_type = symptom_guidance[
+                    feature
+                ]["type"]
+
+                if feature_type == "non_modifiable":
+
+                    feedback_parts.append(
+                        f"**{feature} — {priority}** "
+                        f"(`+{shap_value:.4f}`)\n\n"
+                        f"{personalized_actions.get(feature, symptom_guidance[feature]['guidance'])}"
+                        "\n"
+                    )
+
+                    continue
+
+            # ----------------------------------------------
+            # Symptom-specific actionable feedback
+            # ----------------------------------------------
+
+            action = personalized_actions.get(
                 feature,
-                {}
-            ).get(
-                "name",
-                feature
+                symptom_guidance.get(
+                    feature,
+                    {}
+                ).get(
+                    "guidance",
+                    "Consider discussing this finding with "
+                    "a healthcare professional."
+                )
             )
 
-            why_text += (
-                f"🔴 **{feature_name}** — positive model "
-                f"influence (`{shap_value:.4f}`)\n\n"
+            feedback_parts.append(
+                f"**{feature} — {priority}** "
+                f"(`+{shap_value:.4f}`)\n\n"
+                f"{action}\n"
             )
-
-        feedback_sections.append(
-            why_text
-        )
 
     else:
 
-        feedback_sections.append(
-            "### 🧠 Why did the model make this prediction?\n\n"
+        feedback_parts.append(
+            "\n### 🟢 Positive Contributors\n\n"
             "No positive SHAP contributors were identified "
             "for this patient profile."
         )
 
-
     # --------------------------------------------------------
-    # What deserves attention?
+    # Negative SHAP contributors
     # --------------------------------------------------------
 
-    attention_factors = positive_factors[
-        positive_factors["Feature"].isin(
-            [
-                feature
-                for feature, info in symptom_guidance.items()
-                if info["type"] == "symptom"
-            ]
-        )
-    ]
+    negative_factors = explanation[
+        explanation["SHAP"] < 0
+    ].copy()
 
-    if len(attention_factors) > 0:
+    if len(negative_factors) > 0:
 
-        attention_text = (
-            "### 🎯 What deserves attention?\n\n"
+        feedback_parts.append(
+            "\n### 🟢 Factors Decreasing Predicted Risk\n"
         )
 
-        for _, row in attention_factors.iterrows():
+        for _, row in negative_factors.iterrows():
 
             feature = row["Feature"]
+            shap_value = float(row["SHAP"])
 
-            guidance = symptom_guidance.get(
-                feature
+            feedback_parts.append(
+                f"**{feature}** — negative model influence "
+                f"(`{shap_value:.4f}`)\n"
             )
 
-            if guidance:
-
-                attention_text += (
-                    f"**{guidance['priority']} priority — "
-                    f"{guidance['name']}**\n"
-                    f"{guidance['guidance']}\n\n"
-                )
-
-        feedback_sections.append(
-            attention_text
+        feedback_parts.append(
+            "\nThese features reduced the model's predicted risk "
+            "for this individual profile. A negative SHAP value "
+            "does not mean that a symptom should be treated or "
+            "that it provides protection from diabetes."
         )
 
-
     # --------------------------------------------------------
-    # Non-modifiable context
-    # --------------------------------------------------------
-
-    context_factors = symptom_explanation[
-        symptom_explanation["Feature"].isin(
-            [
-                feature
-                for feature, info in symptom_guidance.items()
-                if info["type"] == "non_modifiable"
-            ]
-        )
-    ]
-
-    if len(context_factors) > 0:
-
-        context_text = (
-            "### ℹ️ Non-modifiable Context\n\n"
-        )
-
-        for _, row in context_factors.iterrows():
-
-            feature = row["Feature"]
-
-            guidance = symptom_guidance.get(
-                feature
-            )
-
-            if guidance:
-
-                context_text += (
-                    f"**{guidance['name']}** — "
-                    f"{guidance['guidance']}\n\n"
-                )
-
-        feedback_sections.append(
-            context_text
-        )
-
-
-    # --------------------------------------------------------
-    # Recommended next step
+    # Overall next step
     # --------------------------------------------------------
 
-    feedback_sections.append(
-        "### 🩺 Recommended Next Step\n\n"
-        "Because the model indicates a diabetes-risk pattern, "
-        "consider appropriate blood-glucose testing and professional "
-        "medical evaluation, particularly if relevant symptoms are "
-        "persistent, unexplained, or worsening."
+    feedback_parts.append(
+        "\n### 🩺 Recommended Next Step\n\n"
+        "This system provides a machine-learning risk assessment, "
+        "not a medical diagnosis. If the reported symptoms are "
+        "persistent, worsening, or concerning, consider appropriate "
+        "blood-glucose testing and professional medical evaluation."
     )
 
+    return "\n\n".join(feedback_parts)
 
-    # --------------------------------------------------------
-    # Disclaimer
-    # --------------------------------------------------------
-
-    feedback_sections.append(
-        "---\n"
-        "⚠️ **Important:** This system provides machine-learning "
-        "risk assessment and personalized informational feedback. "
-        "It is not a medical diagnosis and should not replace "
-        "professional medical advice."
-    )
-
-    return "\n\n".join(
-        feedback_sections
-    )
-
-
-# ============================================================
-# SYMPTOM QSVM PREDICTION FUNCTION
-# ============================================================
 
 def predict_symptom_risk(
     polyuria,
