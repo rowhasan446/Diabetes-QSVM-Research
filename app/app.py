@@ -119,62 +119,102 @@ def generate_clinical_feedback(
     clinical_explanation
 ):
     """
-    Generate controlled, personalized informational feedback.
+    Generate controlled, personalized clinical feedback.
 
-    The feedback uses:
-        - QSVM prediction
-        - patient-specific SHAP values
-        - predefined clinical guidance
+    Uses:
+        - Clinical QSVM prediction
+        - Patient-specific SHAP
+        - Predefined clinical guidance
 
-    It does NOT diagnose, prescribe, or modify the QSVM result.
+    SHAP explains the prediction only.
+    It does NOT modify the QSVM prediction.
     """
 
     feedback_sections = []
 
     # --------------------------------------------------------
+    # Work directly with the SHAP DataFrame returned by
+    # analyze_clinical_shap()
+    # --------------------------------------------------------
+
+    explanation = clinical_explanation.copy()
+
+    explanation["SHAP"] = pd.to_numeric(
+        explanation["SHAP"],
+        errors="coerce"
+    )
+
+    explanation["Absolute_SHAP"] = pd.to_numeric(
+        explanation["Absolute_SHAP"],
+        errors="coerce"
+    )
+
+    explanation = explanation.dropna(
+        subset=["SHAP", "Absolute_SHAP"]
+    )
+
+    explanation = explanation.sort_values(
+        "Absolute_SHAP",
+        ascending=False
+    ).reset_index(drop=True)
+
+    # --------------------------------------------------------
     # Risk result
     # --------------------------------------------------------
 
-    if prediction == 1:
+    if int(prediction) == 1:
 
         feedback_sections.append(
             "🔴 **Higher Predicted Diabetes Risk**\n\n"
-            "The clinical QSVM classified the current clinical "
-            "profile as higher predicted diabetes risk."
+            "The Clinical QSVM classified the current "
+            "clinical profile as higher predicted "
+            "diabetes risk."
         )
 
     else:
 
         feedback_sections.append(
             "🟢 **Lower Predicted Diabetes Risk**\n\n"
-            "The clinical QSVM classified the current clinical "
-            "profile as lower predicted diabetes risk."
+            "The Clinical QSVM classified the current "
+            "clinical profile as lower predicted "
+            "diabetes risk."
         )
 
-
     # --------------------------------------------------------
-    # Positive SHAP contributors
+    # Patient-specific SHAP contributors
     # --------------------------------------------------------
 
-    positive_factors = clinical_explanation[
-        clinical_explanation["SHAP"] > 0
+    positive_factors = explanation[
+        explanation["SHAP"] > 0
     ].copy()
+
+    negative_factors = explanation[
+        explanation["SHAP"] < 0
+    ].copy()
+
+    positive_factors = positive_factors.sort_values(
+        "Absolute_SHAP",
+        ascending=False
+    )
+
+    negative_factors = negative_factors.sort_values(
+        "Absolute_SHAP",
+        ascending=False
+    )
+
+    why_text = (
+        "### 🧠 Why did the model make this prediction?\n\n"
+    )
 
     if len(positive_factors) > 0:
 
-        positive_factors = positive_factors.sort_values(
-            "SHAP",
-            ascending=False
+        why_text += (
+            "**Factors increasing predicted risk:**\n\n"
         )
 
-        why_text = (
-            "### 🧠 Why did the model make this prediction?\n\n"
-        )
-
-        for _, row in positive_factors.iterrows():
+        for _, row in positive_factors.head(3).iterrows():
 
             feature = row["Feature"]
-            shap_value = row["SHAP"]
 
             feature_name = clinical_guidance.get(
                 feature,
@@ -185,30 +225,61 @@ def generate_clinical_feedback(
             )
 
             why_text += (
-                f"🔴 **{feature_name}** — positive model "
-                f"influence (`{shap_value:.4f}`)\n\n"
+                f"🔴 **{feature_name}** — "
+                f"positive model influence "
+                f"(`{float(row['SHAP']):+.4f}`)\n\n"
             )
 
-        feedback_sections.append(why_text)
+    if len(negative_factors) > 0:
 
-    else:
-
-        feedback_sections.append(
-            "### 🧠 Why did the model make this prediction?\n\n"
-            "No positive SHAP contributors were identified "
-            "for this patient profile."
+        why_text += (
+            "**Factors decreasing predicted risk:**\n\n"
         )
 
+        for _, row in negative_factors.head(3).iterrows():
+
+            feature = row["Feature"]
+
+            feature_name = clinical_guidance.get(
+                feature,
+                {}
+            ).get(
+                "name",
+                feature
+            )
+
+            why_text += (
+                f"🟢 **{feature_name}** — "
+                f"negative model influence "
+                f"(`{float(row['SHAP']):+.4f}`)\n\n"
+            )
+
+    if (
+        len(positive_factors) == 0
+        and len(negative_factors) == 0
+    ):
+
+        why_text += (
+            "No interpretable SHAP contribution was "
+            "available for this patient profile."
+        )
+
+    feedback_sections.append(
+        why_text
+    )
 
     # --------------------------------------------------------
-    # What deserves attention?
+    # Factors deserving attention
+    # Only positive SHAP contributors are treated as
+    # model-supported risk-increasing factors.
     # --------------------------------------------------------
 
     attention_factors = positive_factors[
         positive_factors["Feature"].isin(
             [
                 feature
-                for feature, info in clinical_guidance.items()
+                for feature, info
+                in clinical_guidance.items()
                 if info["type"] != "non_modifiable"
             ]
         )
@@ -220,7 +291,7 @@ def generate_clinical_feedback(
             "### 🎯 What deserves attention?\n\n"
         )
 
-        for _, row in attention_factors.iterrows():
+        for _, row in attention_factors.head(3).iterrows():
 
             feature = row["Feature"]
 
@@ -232,22 +303,24 @@ def generate_clinical_feedback(
 
                 attention_text += (
                     f"**{guidance['priority']} priority — "
-                    f"{guidance['name']}**\n"
+                    f"{guidance['name']}**\n\n"
                     f"{guidance['guidance']}\n\n"
                 )
 
-        feedback_sections.append(attention_text)
-
+        feedback_sections.append(
+            attention_text
+        )
 
     # --------------------------------------------------------
     # Non-modifiable context
     # --------------------------------------------------------
 
-    context_factors = clinical_explanation[
-        clinical_explanation["Feature"].isin(
+    context_factors = explanation[
+        explanation["Feature"].isin(
             [
                 feature
-                for feature, info in clinical_guidance.items()
+                for feature, info
+                in clinical_guidance.items()
                 if info["type"] == "non_modifiable"
             ]
         )
@@ -256,7 +329,7 @@ def generate_clinical_feedback(
     if len(context_factors) > 0:
 
         context_text = (
-            "### ℹ️ Non-modifiable Risk Context\n\n"
+            "### ℹ️ Non-modifiable Context\n\n"
         )
 
         for _, row in context_factors.iterrows():
@@ -274,8 +347,9 @@ def generate_clinical_feedback(
                     f"{guidance['guidance']}\n\n"
                 )
 
-        feedback_sections.append(context_text)
-
+        feedback_sections.append(
+            context_text
+        )
 
     # --------------------------------------------------------
     # Recommended next step
@@ -283,13 +357,13 @@ def generate_clinical_feedback(
 
     feedback_sections.append(
         "### 🩺 Recommended Next Step\n\n"
-        "Because this system provides a machine-learning risk "
-        "assessment, consider appropriate diabetes testing and "
-        "professional medical evaluation. If you already have "
-        "abnormal glucose or blood-pressure measurements, discuss "
-        "them with a healthcare professional."
+        "Because this system provides a machine-learning "
+        "risk assessment, consider appropriate diabetes "
+        "testing and professional medical evaluation. "
+        "If you already have abnormal glucose or "
+        "blood-pressure measurements, discuss them with "
+        "a healthcare professional."
     )
-
 
     # --------------------------------------------------------
     # Disclaimer
@@ -297,18 +371,16 @@ def generate_clinical_feedback(
 
     feedback_sections.append(
         "---\n"
-        "⚠️ **Important:** This system provides machine-learning "
-        "risk assessment and personalized informational feedback. "
-        "It is not a medical diagnosis and should not replace "
-        "professional medical advice."
+        "⚠️ **Important:** This system provides "
+        "machine-learning risk assessment and personalized "
+        "informational feedback. It is not a medical "
+        "diagnosis and should not replace professional "
+        "medical advice."
     )
 
-    return "\n\n".join(feedback_sections)
-
-
-# ============================================================
-# CLINICAL QSVM PREDICTION FUNCTION
-# ============================================================
+    return "\n\n".join(
+        feedback_sections
+    )
 
 def predict_clinical_risk(
     age,
@@ -1364,6 +1436,23 @@ def load_symptom_model():
 
     return model, scaler, features, threshold, surrogate
 
+
+# ============================================================
+# SAFE CLINICAL FEATURE FALLBACK
+# ============================================================
+
+# These are the exact five features used by the finalized
+# Clinical QSVM. The saved model feature list remains the
+# authoritative source whenever the model loads successfully.
+
+if "clinical_features" not in globals():
+    clinical_features = [
+        "family_diabetes",
+        "hypertensive",
+        "glucose",
+        "bmi",
+        "age"
+    ]
 
 # ============================================================
 # LOAD MODELS
