@@ -1990,36 +1990,8 @@ if assessment_method == "🩺 Clinical Data":
                         )
 
                 # ------------------------------------------------
-                # PERSONALIZED SYMPTOM FEEDBACK
+                # FINAL CLINICAL WARNING
                 # ------------------------------------------------
-
-                if symptom_shap_loaded:
-
-                    try:
-
-                        symptom_feedback = (
-                            generate_symptom_feedback(
-                                prediction=symptom_result["prediction"],
-                                symptom_explanation=symptom_explanation
-                            )
-                        )
-
-                        st.divider()
-
-                        st.subheader(
-                            "🩺 Personalized Health Feedback"
-                        )
-
-                        st.markdown(
-                            symptom_feedback
-                        )
-
-                    except Exception as e:
-
-                        st.warning(
-                            "⚠️ Personalized symptom feedback "
-                            f"could not be generated: {e}"
-                        )
 
                 st.warning(
                     "⚠️ This is a machine-learning risk assessment, "
@@ -2413,6 +2385,38 @@ else:
 
 
                 # ------------------------------------------------
+
+                # PERSONALIZED SYMPTOM FEEDBACK
+                # ------------------------------------------------
+
+                if symptom_shap_loaded:
+
+                    try:
+
+                        symptom_feedback = (
+                            generate_symptom_feedback(
+                                prediction=symptom_result["prediction"],
+                                symptom_explanation=symptom_explanation
+                            )
+                        )
+
+                        st.divider()
+
+                        st.subheader(
+                            "🩺 Personalized Health Feedback"
+                        )
+
+                        st.markdown(
+                            symptom_feedback
+                        )
+
+                    except Exception as e:
+
+                        st.warning(
+                            "⚠️ Personalized symptom feedback "
+                            f"could not be generated: {e}"
+                        )
+
                 # RESEARCH DML CONTEXT
                 # ------------------------------------------------
 
